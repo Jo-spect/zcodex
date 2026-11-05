@@ -121,8 +121,8 @@ jobs:
               print(f"export {key}={shlex.quote(value)}")
           PY
           source "$RUNNER_TEMP/grok-test-env"
-          just test --target "$TARGET" --cargo-profile release -p codex-login --lib -E 'test(grok)'
-          just test --target "$TARGET" --cargo-profile release -p codex-cli --test login -E 'test(grok)'
+          just test --target "$TARGET" --cargo-profile release -p codex-login --lib -E 'test(grok)' 2>&1 | tee grok-tests.log
+          just test --target "$TARGET" --cargo-profile release -p codex-cli --test login -E 'test(grok)' 2>&1 | tee -a grok-tests.log
 
       - name: Smoke test CLI
         env:
@@ -145,9 +145,27 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: build-log-${{ matrix.name }}
-          path: build-${{ matrix.name }}.log
+          path: |
+            build-${{ matrix.name }}.log
+            grok-tests.log
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Summarize failure
+        if: failure()
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"## Failure details: {os.environ['PACKAGE_NAME']}\n")
+              for path in [Path(f"build-{os.environ['PACKAGE_NAME']}.log"), Path("grok-tests.log")]:
+                  if path.exists():
+                      tail = "\n".join(path.read_text(errors="replace").splitlines()[-120:])[-30000:]
+                      summary.write(f"### {path.name}\n\n````text\n{tail}\n````\n")
+          PY
 
       - name: Save build cache
         if: always() && !cancelled() && steps.cache.outcome == 'success'
