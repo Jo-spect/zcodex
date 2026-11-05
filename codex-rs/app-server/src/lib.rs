@@ -1,4 +1,6 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
+// Session task futures require deeper layout queries when compiled by this crate.
+#![recursion_limit = "256"]
 
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::ConfigLayerStackOrdering;
