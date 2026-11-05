@@ -106,7 +106,23 @@ jobs:
             2>&1 | tee "build-$PACKAGE_NAME.log"
 
       - name: Test Grok account authentication
-        run: just test --cargo-profile release -p codex-login -p codex-cli -E 'test(grok)'
+        env:
+          TARGET: ${{ matrix.target }}
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          python3 - <<'PY' > "$RUNNER_TEMP/grok-test-env"
+          import os
+          import sys
+          sys.path.insert(0, "scripts")
+          from codex_package.targets import TARGET_SPECS
+          from codex_package.v8 import resolve_codex_v8_cargo_env
+          import shlex
+          for key, value in resolve_codex_v8_cargo_env(TARGET_SPECS[os.environ["TARGET"]]).items():
+              print(f"export {key}={shlex.quote(value)}")
+          PY
+          source "$RUNNER_TEMP/grok-test-env"
+          just test --target "$TARGET" --cargo-profile release -p codex-login --lib -E 'test(grok)'
+          just test --target "$TARGET" --cargo-profile release -p codex-cli --test login -E 'test(grok)'
 
       - name: Smoke test CLI
         env:
