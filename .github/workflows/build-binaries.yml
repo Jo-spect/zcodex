@@ -1,0 +1,92 @@
+name: Build Linux AMD64 and macOS ARM64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-binaries-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - name: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libcap-dev libssl-dev \
+            libasound2-dev libudev-dev cmake ninja-build clang
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake pkgconf
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+
+      # The package builder verifies the matching prebuilt V8 artifacts and
+      # includes runtime resources such as ripgrep and Linux bubblewrap.
+      - name: Build and package
+        env:
+          TARGET: ${{ matrix.target }}
+          PACKAGE_NAME: ${{ matrix.name }}
+        run: |
+          python3 scripts/build_codex_package.py \
+            --target "$TARGET" \
+            --cargo-profile release \
+            --package-dir "dist/$PACKAGE_NAME" \
+            --archive-output "dist/codex-$PACKAGE_NAME.tar.gz"
+
+      - name: Smoke test CLI
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+        run: |
+          "dist/$PACKAGE_NAME/bin/codex" --version
+          "dist/$PACKAGE_NAME/bin/codex" login grok --help
+
+      - name: Upload package
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: codex-${{ matrix.name }}
+          path: dist/codex-${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
