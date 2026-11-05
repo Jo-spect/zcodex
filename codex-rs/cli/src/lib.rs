@@ -1,5 +1,6 @@
 pub(crate) mod debug_sandbox;
 mod exit_status;
+pub mod grok_login;
 pub(crate) mod login;
 
 use clap::Parser;

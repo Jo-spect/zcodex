@@ -67,7 +67,7 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::RefreshTokenError;
 use codex_login::UnauthorizedRecovery;
-use codex_login::default_client::build_reqwest_client;
+use codex_login::default_client::build_provider_client;
 use codex_otel::SessionTelemetry;
 use codex_otel::current_span_w3c_trace_context;
 
@@ -470,7 +470,9 @@ impl ModelClient {
             return Ok(Vec::new());
         }
         let client_setup = self.current_client_setup().await?;
-        let transport = ReqwestTransport::new(build_reqwest_client());
+        let transport = ReqwestTransport::new(build_provider_client(
+            self.state.provider.info().proxy.as_deref(),
+        )?);
         let request_telemetry = Self::build_request_telemetry(
             session_telemetry,
             AuthRequestTelemetryContext::new(
@@ -563,7 +565,9 @@ impl ModelClient {
         sideband_headers.extend(sideband_websocket_auth_headers(
             client_setup.api_auth.as_ref(),
         ));
-        let transport = ReqwestTransport::new(build_reqwest_client());
+        let transport = ReqwestTransport::new(build_provider_client(
+            self.state.provider.info().proxy.as_deref(),
+        )?);
         let response =
             ApiRealtimeCallClient::new(transport, client_setup.api_provider, client_setup.api_auth)
                 .create_with_session_and_headers(sdp, session_config, extra_headers)
@@ -594,7 +598,9 @@ impl ModelClient {
         }
 
         let client_setup = self.current_client_setup().await?;
-        let transport = ReqwestTransport::new(build_reqwest_client());
+        let transport = ReqwestTransport::new(build_provider_client(
+            self.state.provider.info().proxy.as_deref(),
+        )?);
         let request_telemetry = Self::build_request_telemetry(
             session_telemetry,
             AuthRequestTelemetryContext::new(
@@ -820,7 +826,9 @@ impl ModelClient {
     ///
     /// WebSocket use is controlled by provider capability and session-scoped fallback state.
     pub fn responses_websocket_enabled(&self) -> bool {
-        if !self.state.provider.info().supports_websockets
+        if self.state.provider.info().wire_api == WireApi::Chat
+            || self.state.provider.info().proxy.is_some()
+            || !self.state.provider.info().supports_websockets
             || self.state.disable_websockets.load(Ordering::Relaxed)
         {
             return false;
@@ -1273,7 +1281,9 @@ impl ModelClientSession {
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup().await?;
-            let transport = ReqwestTransport::new(build_reqwest_client());
+            let transport = ReqwestTransport::new(build_provider_client(
+                self.client.state.provider.info().proxy.as_deref(),
+            )?);
             let request_auth_context = AuthRequestTelemetryContext::new(
                 client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
@@ -1311,6 +1321,11 @@ impl ModelClientSession {
                 client_setup.api_auth,
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let client = if self.client.state.provider.info().wire_api == WireApi::Chat {
+                client.with_chat_completions()
+            } else {
+                client
+            };
             let stream_result = client.stream_request(request, options).await;
 
             match stream_result {
@@ -1625,7 +1640,7 @@ impl ModelClientSession {
     ) -> Result<ResponseStream> {
         let wire_api = self.client.state.provider.info().wire_api;
         match wire_api {
-            WireApi::Responses => {
+            WireApi::Responses | WireApi::Chat => {
                 if self.client.responses_websocket_enabled() {
                     let request_trace = current_span_w3c_trace_context();
                     match self

@@ -53,6 +53,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
     let provider = ModelProviderInfo {
         name: "mock".into(),
         base_url: Some(format!("{}/v1", server.uri())),
+        proxy: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -185,6 +186,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
     let provider = ModelProviderInfo {
         name: "mock".into(),
         base_url: Some(format!("{}/v1", server.uri())),
+        proxy: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -298,6 +300,7 @@ async fn responses_respects_model_info_overrides_from_config() {
     let provider = ModelProviderInfo {
         name: "mock".into(),
         base_url: Some(format!("{}/v1", server.uri())),
+        proxy: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,

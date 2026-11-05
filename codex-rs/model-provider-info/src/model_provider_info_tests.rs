@@ -14,6 +14,7 @@ base_url = "http://localhost:11434/v1"
     let expected_provider = ModelProviderInfo {
         name: "Ollama".into(),
         base_url: Some("http://localhost:11434/v1".into()),
+        proxy: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -46,6 +47,7 @@ query_params = { api-version = "2025-04-01-preview" }
     let expected_provider = ModelProviderInfo {
         name: "Azure".into(),
         base_url: Some("https://xxxxx.openai.azure.com/openai".into()),
+        proxy: None,
         env_key: Some("AZURE_OPENAI_API_KEY".into()),
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -81,6 +83,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
     let expected_provider = ModelProviderInfo {
         name: "Example".into(),
         base_url: Some("https://example.com".into()),
+        proxy: None,
         env_key: Some("API_KEY".into()),
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -107,16 +110,27 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
 }
 
 #[test]
-fn test_deserialize_chat_wire_api_shows_helpful_error() {
+fn test_deserialize_chat_wire_api() {
     let provider_toml = r#"
 name = "OpenAI using Chat Completions"
 base_url = "https://api.openai.com/v1"
 env_key = "OPENAI_API_KEY"
 wire_api = "chat"
+proxy = "socks5://127.0.0.1:1080"
         "#;
 
-    let err = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap_err();
-    assert!(err.to_string().contains(CHAT_WIRE_API_REMOVED_ERROR));
+    let provider = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap();
+    assert_eq!(
+        provider,
+        ModelProviderInfo {
+            name: "OpenAI using Chat Completions".into(),
+            base_url: Some("https://api.openai.com/v1".into()),
+            env_key: Some("OPENAI_API_KEY".into()),
+            wire_api: WireApi::Chat,
+            proxy: Some("socks5://127.0.0.1:1080".into()),
+            ..Default::default()
+        }
+    );
 }
 
 #[test]
@@ -153,6 +167,7 @@ fn test_supports_remote_compaction_for_azure_name() {
     let provider = ModelProviderInfo {
         name: "Azure".into(),
         base_url: Some("https://example.com/openai".into()),
+        proxy: None,
         env_key: Some("AZURE_OPENAI_API_KEY".into()),
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -178,6 +193,7 @@ fn test_supports_remote_compaction_for_non_openai_non_azure_provider() {
     let provider = ModelProviderInfo {
         name: "Example".into(),
         base_url: Some("https://example.com/v1".into()),
+        proxy: None,
         env_key: Some("API_KEY".into()),
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -255,6 +271,7 @@ fn test_create_amazon_bedrock_provider() {
         ModelProviderInfo {
             name: "Amazon Bedrock".to_string(),
             base_url: Some("https://bedrock-mantle.us-east-1.api.aws/openai/v1".to_string()),
+            proxy: None,
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,
@@ -416,6 +433,7 @@ fn test_validate_provider_aws_rejects_conflicting_auth() {
             profile: None,
             region: None,
         }),
+        proxy: None,
         env_key: Some("AWS_BEARER_TOKEN_BEDROCK".to_string()),
         supports_websockets: false,
         ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)

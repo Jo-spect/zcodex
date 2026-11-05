@@ -197,6 +197,17 @@ impl ConfiguredModelProvider {
 
 #[async_trait::async_trait]
 impl ModelProvider for ConfiguredModelProvider {
+    fn capabilities(&self) -> ProviderCapabilities {
+        if self.info.wire_api == codex_model_provider_info::WireApi::Chat {
+            ProviderCapabilities {
+                namespace_tools: false,
+                image_generation: false,
+                web_search: false,
+            }
+        } else {
+            ProviderCapabilities::default()
+        }
+    }
     fn info(&self) -> &ModelProviderInfo {
         &self.info
     }
@@ -329,6 +340,7 @@ mod tests {
         ModelProviderInfo {
             name: "mock".into(),
             base_url: Some(base_url),
+            proxy: None,
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,

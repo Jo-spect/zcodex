@@ -220,6 +220,7 @@ fn should_use_remote_compact_task_for_azure_provider() {
     let provider = ModelProviderInfo {
         name: "Azure".into(),
         base_url: Some("https://example.com/openai".into()),
+        proxy: None,
         env_key: Some("AZURE_OPENAI_API_KEY".into()),
         env_key_instructions: None,
         experimental_bearer_token: None,

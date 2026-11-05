@@ -194,6 +194,23 @@ pub fn create_client() -> CodexHttpClient {
     CodexHttpClient::new(inner)
 }
 
+/// Builds a provider HTTP client, preserving custom CAs and explicit proxy failures.
+pub fn build_provider_client(
+    proxy: Option<&str>,
+) -> codex_protocol::error::Result<reqwest::Client> {
+    let Some(proxy_url) = proxy else {
+        return Ok(build_reqwest_client());
+    };
+    let proxy = reqwest::Proxy::all(proxy_url).map_err(|error| {
+        codex_protocol::error::CodexErr::InvalidRequest(format!("invalid provider proxy: {error}"))
+    })?;
+    let builder = reqwest::Client::builder()
+        .default_headers(default_headers())
+        .proxy(proxy);
+    build_reqwest_client_with_custom_ca(with_chatgpt_cloudflare_cookie_store(builder))
+        .map_err(|error| codex_protocol::error::CodexErr::InvalidRequest(error.to_string()))
+}
+
 /// Builds the default reqwest client used for ordinary Codex HTTP traffic.
 ///
 /// This starts from the standard Codex user agent, default headers, and sandbox-specific proxy

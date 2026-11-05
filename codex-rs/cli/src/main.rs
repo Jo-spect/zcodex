@@ -486,6 +486,20 @@ struct LoginCommand {
 enum LoginSubcommand {
     /// Show login status.
     Status,
+    /// Sign in to a Grok account using an xAI device code.
+    Grok {
+        /// Proxy used for Grok login, token refresh, and model requests.
+        #[arg(long)]
+        proxy: Option<String>,
+    },
+    /// Internal provider bearer-token command.
+    #[command(hide = true)]
+    GrokToken {
+        #[arg(long)]
+        home: PathBuf,
+        #[arg(long, value_parser = ["file", "keyring", "auto"])]
+        store: String,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -1283,6 +1297,12 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_config_overrides.clone(),
             );
             match login_cli.action {
+                Some(LoginSubcommand::Grok { proxy }) => {
+                    codex_cli::grok_login::login(login_cli.config_overrides, proxy).await?;
+                }
+                Some(LoginSubcommand::GrokToken { home, store }) => {
+                    codex_cli::grok_login::print_token(home, store).await?;
+                }
                 Some(LoginSubcommand::Status) => {
                     run_login_status(login_cli.config_overrides).await;
                 }

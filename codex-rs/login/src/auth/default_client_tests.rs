@@ -3,6 +3,87 @@ use super::*;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
 
+#[tokio::test]
+async fn provider_socks_proxy_authenticates_with_url_credentials() {
+    use tokio::io::AsyncReadExt;
+    use tokio::io::AsyncWriteExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy = format!("socks5://user:p%40ss@{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut header = [0; 2];
+        socket.read_exact(&mut header).await.unwrap();
+        let mut methods = vec![0; usize::from(header[1])];
+        socket.read_exact(&mut methods).await.unwrap();
+        assert!(methods.contains(&2));
+        socket.write_all(&[5, 2]).await.unwrap();
+        socket.read_exact(&mut header).await.unwrap();
+        let mut username = vec![0; usize::from(header[1])];
+        socket.read_exact(&mut username).await.unwrap();
+        let password_len = socket.read_u8().await.unwrap();
+        let mut password = vec![0; usize::from(password_len)];
+        socket.read_exact(&mut password).await.unwrap();
+        assert_eq!(
+            (header[0], username, password),
+            (1, b"user".to_vec(), b"p@ss".to_vec())
+        );
+        socket.write_all(&[1, 0]).await.unwrap();
+        let mut connect = [0; 10];
+        socket.read_exact(&mut connect).await.unwrap();
+        assert_eq!(connect, [5, 1, 0, 1, 127, 0, 0, 1, 48, 57]);
+        socket
+            .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0])
+            .await
+            .unwrap();
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            request.push(socket.read_u8().await.unwrap());
+        }
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await
+            .unwrap();
+    });
+    let response = build_provider_client(Some(&proxy))
+        .unwrap()
+        .get("http://127.0.0.1:12345/v1/models")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.text().await.unwrap(), "ok");
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn provider_client_routes_requests_through_explicit_proxy() {
+    let proxy = wiremock::MockServer::start().await;
+    let other_proxy = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string("proxied"))
+        .expect(1)
+        .mount(&proxy)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string("other provider"))
+        .expect(1)
+        .mount(&other_proxy)
+        .await;
+    let client = build_provider_client(Some(&proxy.uri())).unwrap();
+    let other_client = build_provider_client(Some(&other_proxy.uri())).unwrap();
+    let response = client
+        .get("http://provider.invalid/v1/models")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.text().await.unwrap(), "proxied");
+    let response = other_client
+        .get("http://provider.invalid/v1/models")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.text().await.unwrap(), "other provider");
+}
+
 #[test]
 fn test_get_codex_user_agent() {
     let user_agent = get_codex_user_agent();

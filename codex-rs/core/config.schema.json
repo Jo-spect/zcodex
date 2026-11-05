@@ -1514,6 +1514,10 @@
           "description": "Friendly display name.",
           "type": "string"
         },
+        "proxy": {
+          "description": "Proxy URL for this provider's model discovery and inference requests.",
+          "type": "string"
+        },
         "query_params": {
           "additionalProperties": {
             "type": "string"
@@ -4342,6 +4346,13 @@
           "description": "The Responses API exposed by OpenAI at `/v1/responses`.",
           "enum": [
             "responses"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "OpenAI-compatible Chat Completions, including DeepSeek deployments.",
+          "enum": [
+            "chat"
           ],
           "type": "string"
         }

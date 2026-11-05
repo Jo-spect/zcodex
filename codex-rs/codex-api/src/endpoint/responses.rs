@@ -26,6 +26,7 @@ use tracing::instrument;
 pub struct ResponsesClient<T: HttpTransport> {
     session: EndpointSession<T>,
     sse_telemetry: Option<Arc<dyn SseTelemetry>>,
+    chat_completions: bool,
 }
 
 #[derive(Default)]
@@ -43,7 +44,14 @@ impl<T: HttpTransport> ResponsesClient<T> {
         Self {
             session: EndpointSession::new(transport, provider, auth),
             sse_telemetry: None,
+            chat_completions: false,
         }
+    }
+
+    /// Uses Chat Completions while retaining the canonical agent event stream.
+    pub fn with_chat_completions(mut self) -> Self {
+        self.chat_completions = true;
+        self
     }
 
     pub fn with_telemetry(
@@ -54,6 +62,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
         Self {
             session: self.session.with_request_telemetry(request),
             sse_telemetry: sse,
+            chat_completions: self.chat_completions,
         }
     }
 
@@ -81,6 +90,30 @@ impl<T: HttpTransport> ResponsesClient<T> {
             turn_state,
         } = options;
 
+        if self.chat_completions {
+            let body = crate::chat_completions::request_body(&request)?;
+            let custom_tools = request
+                .tools
+                .iter()
+                .filter(|tool| tool["type"] == "custom")
+                .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+                .collect();
+            let response = self
+                .session
+                .stream_with(
+                    Method::POST,
+                    "chat/completions",
+                    extra_headers,
+                    Some(body),
+                    |_| {},
+                )
+                .await?;
+            return Ok(crate::chat_completions::stream(
+                response,
+                self.session.provider().stream_idle_timeout,
+                custom_tools,
+            ));
+        }
         let mut body = serde_json::to_value(&request)
             .map_err(|e| ApiError::Stream(format!("failed to encode responses request: {e}")))?;
         if request.store && self.session.provider().is_azure_responses_endpoint() {

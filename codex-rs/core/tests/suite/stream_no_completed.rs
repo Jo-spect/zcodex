@@ -48,6 +48,7 @@ async fn retries_on_early_close() {
         // Environment variable that should exist in the test environment.
         // ModelClient will return an error if the environment variable for the
         // provider is not set.
+        proxy: None,
         env_key: Some("PATH".into()),
         env_key_instructions: None,
         experimental_bearer_token: None,

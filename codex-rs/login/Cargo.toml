@@ -24,7 +24,7 @@ codex-utils-template = { workspace = true }
 once_cell = { workspace = true }
 os_info = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true, features = ["json", "blocking"] }
+reqwest = { workspace = true, features = ["json", "blocking", "socks"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -43,6 +43,7 @@ urlencoding = { workspace = true }
 webbrowser = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 anyhow = { workspace = true }
 core_test_support = { workspace = true }
 jsonwebtoken = { workspace = true }

@@ -26,6 +26,40 @@ fn read_auth_json(codex_home: &Path) -> Result<Value> {
 }
 
 #[test]
+fn grok_provider_command_reads_separate_cached_credentials() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    write_file_auth_config(codex_home.path())?;
+    let other_auth = r#"{"OPENAI_API_KEY":"existing-openai-key"}"#;
+    std::fs::write(codex_home.path().join("auth.json"), other_auth)?;
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs()
+        + 3600;
+    std::fs::write(
+        codex_home.path().join("grok-auth.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "access_token":"grok-test-bearer", "refresh_token":"private-refresh", "expires_at":expires_at
+        }))?,
+    )?;
+    let output = codex_command(codex_home.path())?
+        .args(["login", "grok-token", "--home"])
+        .arg(codex_home.path())
+        .args(["--store", "file"])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout)?, "grok-test-bearer\n");
+    assert_eq!(
+        std::fs::read_to_string(codex_home.path().join("auth.json"))?,
+        other_auth
+    );
+    Ok(())
+}
+
+#[test]
 fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_file_auth_config(codex_home.path())?;

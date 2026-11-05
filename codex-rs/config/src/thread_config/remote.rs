@@ -153,6 +153,7 @@ fn model_provider_from_proto(
     let id = provider.id;
     let wire_api = match proto::WireApi::try_from(provider.wire_api) {
         Ok(proto::WireApi::Responses) => WireApi::Responses,
+        Ok(proto::WireApi::Chat) => WireApi::Chat,
         Ok(proto::WireApi::Unspecified) => {
             return Err(parse_error("remote thread config omitted wire_api"));
         }
@@ -166,6 +167,7 @@ fn model_provider_from_proto(
     let info = ModelProviderInfo {
         name: provider.name,
         base_url: provider.base_url,
+        proxy: provider.proxy,
         env_key: provider.env_key,
         env_key_instructions: provider.env_key_instructions,
         experimental_bearer_token: provider.experimental_bearer_token,
@@ -196,6 +198,7 @@ fn model_provider_to_proto(
     let ModelProviderInfo {
         name,
         base_url,
+        proxy,
         env_key,
         env_key_instructions,
         experimental_bearer_token,
@@ -217,6 +220,7 @@ fn model_provider_to_proto(
         id: id.into(),
         name,
         base_url,
+        proxy,
         env_key,
         env_key_instructions,
         experimental_bearer_token,
@@ -283,6 +287,7 @@ fn proto_string_map(values: HashMap<String, String>) -> proto::StringMap {
 fn proto_wire_api(wire_api: WireApi) -> proto::WireApi {
     match wire_api {
         WireApi::Responses => proto::WireApi::Responses,
+        WireApi::Chat => proto::WireApi::Chat,
     }
 }
 
@@ -412,6 +417,7 @@ mod tests {
                         model_providers: vec![proto::ModelProvider {
                             id: "local".to_string(),
                             name: "Local".to_string(),
+                            proxy: None,
                             base_url: Some("http://127.0.0.1:8061/api/codex".to_string()),
                             env_key: None,
                             env_key_instructions: None,
@@ -482,6 +488,7 @@ mod tests {
         ModelProviderInfo {
             name: "Local".to_string(),
             base_url: Some("http://127.0.0.1:8061/api/codex".to_string()),
+            proxy: None,
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,
