@@ -5,10 +5,16 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import sys
 import tempfile
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from ssl import SSLError
+from http.client import IncompleteRead
+from urllib.error import HTTPError
+from urllib.error import URLError
 from urllib.request import urlopen
 
 from .targets import REPO_ROOT
@@ -16,6 +22,7 @@ from .targets import TargetSpec
 
 
 DOWNLOAD_TIMEOUT_SECS = 120
+DOWNLOAD_MAX_ATTEMPTS = 5
 
 
 @dataclass(frozen=True)
@@ -170,11 +177,50 @@ def has_checksum(path: Path, expected: str) -> bool:
 def download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     temp_path = dest.with_suffix(f"{dest.suffix}.tmp")
-    temp_path.unlink(missing_ok=True)
-    try:
-        with urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECS) as response:
-            with temp_path.open("wb") as output:
-                shutil.copyfileobj(response, output)
-        temp_path.replace(dest)
-    finally:
+    for attempt in range(1, DOWNLOAD_MAX_ATTEMPTS + 1):
         temp_path.unlink(missing_ok=True)
+        try:
+            with urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECS) as response:
+                content_length = response.headers.get("Content-Length")
+                with temp_path.open("wb") as output:
+                    shutil.copyfileobj(response, output)
+                if content_length is not None and temp_path.stat().st_size != int(
+                    content_length
+                ):
+                    raise ConnectionError(
+                        "V8 download ended before the complete response arrived"
+                    )
+            temp_path.replace(dest)
+            return
+        except (
+            URLError,
+            TimeoutError,
+            ConnectionError,
+            IncompleteRead,
+            SSLError,
+        ) as error:
+            if isinstance(error, HTTPError) and error.code not in {
+                408,
+                429,
+                500,
+                502,
+                503,
+                504,
+            }:
+                raise RuntimeError(
+                    f"Cannot download V8 artifact {url}: HTTP {error.code}"
+                ) from error
+            if attempt == DOWNLOAD_MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"Failed to download V8 artifact {url} after {attempt} attempts: {error}"
+                ) from error
+            delay = 2**attempt
+            print(
+                f"V8 download attempt {attempt}/{DOWNLOAD_MAX_ATTEMPTS} failed: {url}: "
+                f"{error}; retrying in {delay}s",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
+        finally:
+            temp_path.unlink(missing_ok=True)
