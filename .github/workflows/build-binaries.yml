@@ -21,14 +21,14 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: linux-amd64
+          - name: linux-amd64-musl
             runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
           - name: macos-arm64
             runner: macos-15
             target: aarch64-apple-darwin
@@ -64,6 +64,21 @@ jobs:
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
         run: brew install cmake pkgconf
+
+      - name: Install Zig for musl native dependencies
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+
+      - name: Configure musl toolchain and static libcap
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+          DEBIAN_FRONTEND: noninteractive
+          APT_UPDATE_ARGS: -o Acquire::Retries=3
+          APT_INSTALL_ARGS: --no-install-recommends
+        run: bash .github/scripts/install-musl-build-tools.sh
 
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
@@ -104,6 +119,30 @@ jobs:
             --package-dir "dist/$PACKAGE_NAME" \
             --archive-output "dist/codex-$PACKAGE_NAME.tar.gz" \
             2>&1 | tee "build-$PACKAGE_NAME.log"
+
+      - name: Verify static Linux executables and older system compatibility
+        if: runner.os == 'Linux'
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+        run: |
+          {
+            for binary in "dist/$PACKAGE_NAME/bin/codex" \
+              "dist/$PACKAGE_NAME/codex-resources/bwrap" \
+              "dist/$PACKAGE_NAME/codex-path/rg"; do
+              file "$binary"
+              metadata="$(readelf --program-headers --dynamic --version-info --wide "$binary")"
+              if grep -Eq 'INTERP|\(NEEDED\)|GLIBC_[0-9]' <<< "$metadata"; then
+                echo "::error::$binary still depends on a dynamic loader or shared libraries"
+                echo "$metadata"
+                exit 1
+              fi
+            done
+            for image in ubuntu:20.04 alpine:3.20; do
+              docker run --rm --network none \
+                -v "$PWD/dist/$PACKAGE_NAME:/opt/codex:ro" "$image" \
+                /bin/sh -ec '/opt/codex/bin/codex --version; /opt/codex/bin/codex login grok --help; /opt/codex/codex-path/rg --version; /opt/codex/codex-resources/bwrap --version'
+            done
+          } 2>&1 | tee compatibility.log
 
       - name: Test Grok account authentication
         env:
@@ -148,6 +187,7 @@ jobs:
           path: |
             build-${{ matrix.name }}.log
             grok-tests.log
+            compatibility.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -161,7 +201,7 @@ jobs:
           from pathlib import Path
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write(f"## Failure details: {os.environ['PACKAGE_NAME']}\n")
-              for path in [Path(f"build-{os.environ['PACKAGE_NAME']}.log"), Path("grok-tests.log")]:
+              for path in [Path(f"build-{os.environ['PACKAGE_NAME']}.log"), Path("grok-tests.log"), Path("compatibility.log")]:
                   if path.exists():
                       tail = "\n".join(path.read_text(errors="replace").splitlines()[-120:])[-30000:]
                       summary.write(f"### {path.name}\n\n````text\n{tail}\n````\n")
