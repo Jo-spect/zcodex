@@ -104,6 +104,30 @@ jobs:
       - name: Check package builder
         run: python3 -m unittest discover -s scripts/codex_package -p 'test_*.py'
 
+      - name: Build static patched zsh with musl
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/static-zsh
+          {
+            docker run --rm -i \
+              -v "$PWD/codex-rs/shell-escalation/patches/zsh-exec-wrapper.patch:/zsh.patch:ro" \
+              -v "$PWD/dist/static-zsh:/output" alpine:3.20 /bin/sh -es <<'SH'
+          apk add --no-cache build-base autoconf bison git ncurses-dev ncurses-static pkgconf
+          git init /tmp/zsh
+          cd /tmp/zsh
+          git remote add origin https://github.com/zsh-users/zsh
+          git fetch --depth 1 origin 77045ef899e53b9598bebc5a41db93a548a40ca6
+          git checkout --detach FETCH_HEAD
+          git apply /zsh.patch
+          ./Util/preconfig
+          LIBS="$(pkg-config --static --libs ncursesw)" LDFLAGS=-static ./configure --disable-dynamic
+          make -j2
+          ./Src/zsh -fc 'print -r -- static-zsh-ok'
+          cp Src/zsh /output/zsh
+          chmod 755 /output/zsh
+          SH
+          } 2>&1 | tee static-zsh.log
+
       # The package builder verifies the matching prebuilt V8 artifacts and
       # includes runtime resources such as ripgrep and Linux bubblewrap.
       - name: Build and package
@@ -113,11 +137,16 @@ jobs:
           TMPDIR: ${{ runner.temp }}
         run: |
           echo "Building commit $(git rev-parse HEAD)"
+          extra_args=()
+          if [[ "$TARGET" == *-linux-musl ]]; then
+            extra_args+=(--zsh-bin "$PWD/dist/static-zsh/zsh")
+          fi
           python3 scripts/build_codex_package.py \
             --target "$TARGET" \
             --cargo-profile release \
             --package-dir "dist/$PACKAGE_NAME" \
             --archive-output "dist/codex-$PACKAGE_NAME.tar.gz" \
+            "${extra_args[@]}" \
             2>&1 | tee "build-$PACKAGE_NAME.log"
 
       - name: Verify static Linux executables and older system compatibility
@@ -128,7 +157,8 @@ jobs:
           {
             for binary in "dist/$PACKAGE_NAME/bin/codex" \
               "dist/$PACKAGE_NAME/codex-resources/bwrap" \
-              "dist/$PACKAGE_NAME/codex-path/rg"; do
+              "dist/$PACKAGE_NAME/codex-path/rg" \
+              "dist/$PACKAGE_NAME/codex-resources/zsh/bin/zsh"; do
               file "$binary"
               metadata="$(readelf --program-headers --dynamic --version-info --wide "$binary")"
               if grep -Eq 'INTERP|\(NEEDED\)|GLIBC_[0-9]' <<< "$metadata"; then
@@ -140,7 +170,7 @@ jobs:
             for image in ubuntu:20.04 alpine:3.20; do
               docker run --rm --network none \
                 -v "$PWD/dist/$PACKAGE_NAME:/opt/codex:ro" "$image" \
-                /bin/sh -ec '/opt/codex/bin/codex --version; /opt/codex/bin/codex login grok --help; /opt/codex/codex-path/rg --version; /opt/codex/codex-resources/bwrap --version'
+                /bin/sh -ec '/opt/codex/bin/codex --version; /opt/codex/bin/codex login grok --help; /opt/codex/codex-path/rg --version; /opt/codex/codex-resources/bwrap --version; /opt/codex/codex-resources/zsh/bin/zsh -fc "print -r -- static-zsh-ok"'
             done
           } 2>&1 | tee compatibility.log
 
@@ -188,6 +218,7 @@ jobs:
             build-${{ matrix.name }}.log
             grok-tests.log
             compatibility.log
+            static-zsh.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -201,7 +232,7 @@ jobs:
           from pathlib import Path
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write(f"## Failure details: {os.environ['PACKAGE_NAME']}\n")
-              for path in [Path(f"build-{os.environ['PACKAGE_NAME']}.log"), Path("grok-tests.log"), Path("compatibility.log")]:
+              for path in [Path(f"build-{os.environ['PACKAGE_NAME']}.log"), Path("grok-tests.log"), Path("compatibility.log"), Path("static-zsh.log")]:
                   if path.exists():
                       tail = "\n".join(path.read_text(errors="replace").splitlines()[-120:])[-30000:]
                       summary.write(f"### {path.name}\n\n````text\n{tail}\n````\n")
